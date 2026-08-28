@@ -68,6 +68,14 @@ Run google-mcp as a container on the same Apple Container network as Barback:
 ./scripts/start-google-mcp.sh
 ```
 
+The script prints the resolved container IP and a ready-to-paste
+`GOOGLE_MCP_URL=http://<ip>:8090/mcp` line after the health check. Apple
+Container does not resolve container names via DNS, and published ports can be
+unreachable from the host, so the working address is the container IP on the
+shared network; use the printed `GOOGLE_MCP_URL` below. The IP changes when the
+container restarts, and [Barback](https://github.com/shiborgi/barback)'s
+startup script re-resolves it and injects the value at startup.
+
 Then register it in `barback.yaml`:
 
 ```yaml
@@ -75,7 +83,7 @@ mcp:
   servers:
     - id: google
       transport: streamable-http
-      url: http://google-mcp:8090/mcp
+      url: env:GOOGLE_MCP_URL
       required: true
       auth:
         bearerToken: env:GOOGLE_MCP_TOKEN
@@ -103,9 +111,11 @@ mcp:
       - google:quick_add
 ```
 
-Grant the toolset to a policy (`mcpToolsets: [calendar]`) and the scopes
-`mcp:list` and `mcp:call` to the client. Clients then see the tools as
-`google.list_events` and so on.
+`GOOGLE_MCP_URL` is resolved from the environment at startup by Barback's
+recursive `env:` config loader, so the example needs no further edits. Grant
+the toolset to a policy (`mcpToolsets: [calendar]`) and the scopes `mcp:list`
+and `mcp:call` to the client. Clients then see the tools as `google.list_events`
+and so on.
 
 ## Development
 

@@ -53,7 +53,15 @@ container run \
 
 for _ in {1..30}; do
   if container exec "$app_name" bun -e 'const response = await fetch(`http://127.0.0.1:${process.env.GOOGLE_MCP_PORT}/health`); if (!response.ok) process.exit(1); console.log(await response.text());' 2>/dev/null; then
-    printf 'google-mcp is running on 127.0.0.1:%s (network %s)\n' "$port" "$network"
+    address="$(container inspect "$app_name" | plutil -extract '0.status.networks.0.ipv4Address' raw - 2>/dev/null || true)"
+    ip="${address%%/*}"
+    if [[ -n "$ip" ]]; then
+      printf 'google-mcp container IP: %s\n' "$ip"
+      printf 'GOOGLE_MCP_URL=http://%s:%s/mcp\n' "$ip" "$port"
+      printf 'Note: published ports were verified unreachable on this platform; container-to-container traffic must use the container IP above.\n'
+    else
+      printf 'Warning: could not resolve the google-mcp container IP; resolve it manually with: container inspect %s\n' "$app_name" >&2
+    fi
     exit 0
   fi
   sleep 1
