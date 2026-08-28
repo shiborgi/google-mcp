@@ -113,7 +113,7 @@
       "milestones": true,
       "issues": true,
       "comments": true,
-      "pushMain": false
+      "pushMain": true
     }
   }
 }
