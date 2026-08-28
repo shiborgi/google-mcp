@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { GoogleMcpEnv } from "../../src/env.ts";
-import type { CalendarClient } from "../../src/google-calendar.ts";
+import { type CalendarClient, GoogleApiError } from "../../src/google-calendar.ts";
 import { createServer } from "../../src/server.ts";
 
 const env: GoogleMcpEnv = {
@@ -77,17 +77,33 @@ describe("MCP contract", () => {
     await server.close();
   });
 
-  test("tool errors are returned as isError results instead of protocol errors", async () => {
+  test("transient tool errors are returned as protocol errors", async () => {
     const failing = fakeClient({
       async get() {
-        throw new Error("upstream unavailable");
+        throw new GoogleApiError("upstream unavailable", 429);
+      },
+    });
+    const { server, mcp } = await connected(failing);
+    await expect(mcp.callTool({ name: "list_calendars", arguments: {} })).rejects.toMatchObject({
+      name: "McpError",
+      code: -32603,
+      message: expect.stringContaining("upstream unavailable"),
+    });
+    await mcp.close();
+    await server.close();
+  });
+
+  test("deterministic tool errors remain isError results", async () => {
+    const failing = fakeClient({
+      async get() {
+        throw new GoogleApiError("event not found", 404);
       },
     });
     const { server, mcp } = await connected(failing);
     const result = await mcp.callTool({ name: "list_calendars", arguments: {} });
     expect(result.isError).toBe(true);
     const text = (result.content as { type: string; text: string }[])[0]?.text ?? "";
-    expect(text).toContain("upstream unavailable");
+    expect(text).toContain("event not found");
     await mcp.close();
     await server.close();
   });

@@ -1,8 +1,14 @@
+import type { RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import {
+  CallToolRequestSchema,
+  type CallToolResult,
+  ErrorCode,
+  McpError,
+} from "@modelcontextprotocol/sdk/types.js";
 import type { GoogleMcpEnv } from "./env.ts";
 import type { CalendarClient } from "./google-calendar.ts";
-import { errorText } from "./tools/common.ts";
+import { errorText, isTransientError } from "./tools/common.ts";
 import {
   createEvent,
   createEventSchema,
@@ -19,11 +25,18 @@ import { listCalendars, listCalendarsSchema, listEvents, listEventsSchema } from
 export const SERVER_NAME = "google-mcp";
 export const SERVER_VERSION = "0.1.0";
 
+type ToolHandler = (args: unknown, extra: unknown) => Promise<CallToolResult>;
+
 function guard(fn: () => Promise<CallToolResult>): Promise<CallToolResult> {
-  return fn().catch((error: unknown) => ({
-    isError: true,
-    content: [{ type: "text" as const, text: errorText(error) }],
-  }));
+  return fn().catch((error: unknown) => {
+    if (isTransientError(error)) {
+      throw new McpError(ErrorCode.InternalError, errorText(error));
+    }
+    return {
+      isError: true,
+      content: [{ type: "text" as const, text: errorText(error) }],
+    };
+  });
 }
 
 export function createServer(client: CalendarClient, env: GoogleMcpEnv): McpServer {
@@ -31,8 +44,9 @@ export function createServer(client: CalendarClient, env: GoogleMcpEnv): McpServ
     { name: SERVER_NAME, version: SERVER_VERSION },
     { capabilities: { tools: { listChanged: false } } },
   );
+  const registeredTools = new Map<string, RegisteredTool>();
 
-  server.registerTool(
+  const listCalendarsTool = server.registerTool(
     "list_calendars",
     {
       description: "List calendars visible to the authenticated Google account",
@@ -41,8 +55,9 @@ export function createServer(client: CalendarClient, env: GoogleMcpEnv): McpServ
     },
     (args) => guard(() => listCalendars(client, args)),
   );
+  registeredTools.set("list_calendars", listCalendarsTool);
 
-  server.registerTool(
+  const listEventsTool = server.registerTool(
     "list_events",
     {
       description: "List events on a calendar within an optional time range",
@@ -51,8 +66,9 @@ export function createServer(client: CalendarClient, env: GoogleMcpEnv): McpServ
     },
     (args) => guard(() => listEvents(client, env, args)),
   );
+  registeredTools.set("list_events", listEventsTool);
 
-  server.registerTool(
+  const getEventTool = server.registerTool(
     "get_event",
     {
       description: "Fetch one event by ID",
@@ -61,8 +77,9 @@ export function createServer(client: CalendarClient, env: GoogleMcpEnv): McpServ
     },
     (args) => guard(() => getEvent(client, env, args)),
   );
+  registeredTools.set("get_event", getEventTool);
 
-  server.registerTool(
+  const createEventTool = server.registerTool(
     "create_event",
     {
       description: "Create a calendar event",
@@ -71,8 +88,9 @@ export function createServer(client: CalendarClient, env: GoogleMcpEnv): McpServ
     },
     (args) => guard(() => createEvent(client, env, args)),
   );
+  registeredTools.set("create_event", createEventTool);
 
-  server.registerTool(
+  const updateEventTool = server.registerTool(
     "update_event",
     {
       description: "Patch selected fields of an existing event",
@@ -86,8 +104,9 @@ export function createServer(client: CalendarClient, env: GoogleMcpEnv): McpServ
     },
     (args) => guard(() => updateEvent(client, env, args)),
   );
+  registeredTools.set("update_event", updateEventTool);
 
-  server.registerTool(
+  const deleteEventTool = server.registerTool(
     "delete_event",
     {
       description: "Delete an event by ID",
@@ -96,8 +115,9 @@ export function createServer(client: CalendarClient, env: GoogleMcpEnv): McpServ
     },
     (args) => guard(() => deleteEvent(client, env, args)),
   );
+  registeredTools.set("delete_event", deleteEventTool);
 
-  server.registerTool(
+  const freeBusyTool = server.registerTool(
     "free_busy",
     {
       description: "Query busy intervals for one or more calendars",
@@ -106,8 +126,9 @@ export function createServer(client: CalendarClient, env: GoogleMcpEnv): McpServ
     },
     (args) => guard(() => freeBusy(client, env, args)),
   );
+  registeredTools.set("free_busy", freeBusyTool);
 
-  server.registerTool(
+  const quickAddTool = server.registerTool(
     "quick_add",
     {
       description: "Create an event from natural language text (Google quickAdd)",
@@ -116,6 +137,30 @@ export function createServer(client: CalendarClient, env: GoogleMcpEnv): McpServ
     },
     (args) => guard(() => quickAdd(client, env, args)),
   );
+  registeredTools.set("quick_add", quickAddTool);
+
+  // The high-level SDK wraps tool errors as isError results; keep transient failures as protocol errors.
+  server.server.removeRequestHandler("tools/call");
+  server.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+    const tool = registeredTools.get(request.params.name);
+    if (!tool?.enabled) {
+      throw new McpError(ErrorCode.InvalidParams, `Tool ${request.params.name} not found`);
+    }
+
+    let args: unknown = request.params.arguments ?? {};
+    try {
+      const schema = tool.inputSchema as
+        | { parseAsync(value: unknown): Promise<unknown> }
+        | undefined;
+      if (schema) args = await schema.parseAsync(args);
+    } catch (error) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Input validation error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return (tool.handler as ToolHandler)(args, extra);
+  });
 
   return server;
 }

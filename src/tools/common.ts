@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { GoogleAuthError } from "../auth.ts";
+import { GoogleApiError } from "../google-calendar.ts";
 
 export const dateTimeOrDate = z
   .string()
@@ -52,6 +54,12 @@ export function toText(data: unknown): string {
 export function errorText(error: unknown): string {
   if (error instanceof Error) return `${error.name}: ${error.message}`;
   return String(error);
+}
+
+export function isTransientError(error: unknown): boolean {
+  if (error instanceof GoogleAuthError) return true;
+  if (error instanceof GoogleApiError) return error.status === 429 || error.status >= 500;
+  return true;
 }
 
 export function eventBody(input: {

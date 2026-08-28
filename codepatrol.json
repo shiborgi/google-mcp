@@ -2,12 +2,7 @@
   "schemaVersion": 1,
   "baseBranch": "main",
   "verification": {
-    "argv": [
-      "bun",
-      "--no-env-file",
-      "run",
-      "check"
-    ],
+    "argv": ["bun", "--no-env-file", "run", "check"],
     "timeoutMs": 180000,
     "sharedPaths": ["node_modules"]
   },

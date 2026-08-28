@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { GoogleAuthError } from "../../src/auth.ts";
 import type { GoogleMcpEnv } from "../../src/env.ts";
-import type { CalendarClient } from "../../src/google-calendar.ts";
+import { type CalendarClient, GoogleApiError } from "../../src/google-calendar.ts";
+import { isTransientError } from "../../src/tools/common.ts";
 import { createEvent } from "../../src/tools/events.ts";
 import { listEvents } from "../../src/tools/list.ts";
 
@@ -61,5 +63,14 @@ describe("calendar tools", () => {
       attendees: [{ email: "carol@example.com", optional: true }],
     });
     expect((result.structuredContent as { id: string }).id).toBe("evt-1");
+  });
+
+  test("classifies deterministic and transient upstream errors", () => {
+    expect(isTransientError(new GoogleApiError("missing", 404))).toBe(false);
+    expect(isTransientError(new GoogleApiError("forbidden", 403))).toBe(false);
+    expect(isTransientError(new GoogleApiError("quota", 429))).toBe(true);
+    expect(isTransientError(new GoogleApiError("unavailable", 500))).toBe(true);
+    expect(isTransientError(new GoogleAuthError("invalid refresh token"))).toBe(true);
+    expect(isTransientError(new Error("network unavailable"))).toBe(true);
   });
 });
