@@ -109,7 +109,7 @@
       "repo": "shiborgi/google-mcp",
       "gitRemote": "origin",
       "tokenEnv": "GITHUB_TOKEN",
-      "wiki": true,
+      "wiki": false,
       "milestones": true,
       "issues": true,
       "comments": true,
