@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { GoogleMcpEnv } from "../env.ts";
 import type { CalendarClient } from "../google-calendar.ts";
-import { dateTimeOrDate, toText } from "./common.ts";
+import { type CalendarEvent, dateTimeOrDate, projectEvent, toText } from "./common.ts";
 
 const MAX_RESULTS_LIMIT = 250;
 
@@ -67,15 +67,20 @@ export async function listEvents(
     {
       timeMin: args.timeMin,
       timeMax: args.timeMax,
-      maxResults: args.maxResults,
+      maxResults: args.maxResults ?? 100,
       pageToken: args.pageToken,
       q: args.q,
       singleEvents: args.singleEvents ?? true,
       orderBy: args.singleEvents === false ? undefined : "startTime",
     },
   );
+  const page = data as { items?: CalendarEvent[]; nextPageToken?: string };
+  const projected: Record<string, unknown> = {
+    ...page,
+    items: (page.items ?? []).map(projectEvent),
+  };
   return {
-    content: [{ type: "text" as const, text: toText(data) }],
-    structuredContent: data as Record<string, unknown>,
+    content: [{ type: "text" as const, text: toText(projected) }],
+    structuredContent: projected,
   };
 }

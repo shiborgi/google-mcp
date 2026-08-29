@@ -34,8 +34,33 @@ export interface CalendarEvent {
   attendees?: { email?: string; displayName?: string; responseStatus?: string }[];
   creator?: { email?: string; displayName?: string };
   organizer?: { email?: string; displayName?: string };
+  recurrence?: string[];
   updated?: string;
   created?: string;
+}
+
+export function projectEvent(event: CalendarEvent): CalendarEvent {
+  const projected: CalendarEvent = {};
+  if (event.id !== undefined) projected.id = event.id;
+  if (event.status !== undefined) projected.status = event.status;
+  if (event.htmlLink !== undefined) projected.htmlLink = event.htmlLink;
+  if (event.summary !== undefined) projected.summary = event.summary;
+  if (event.description !== undefined) projected.description = event.description;
+  if (event.location !== undefined) projected.location = event.location;
+  if (event.start !== undefined) projected.start = event.start;
+  if (event.end !== undefined) projected.end = event.end;
+  if (event.attendees !== undefined) {
+    projected.attendees = event.attendees.map((attendee) => ({
+      ...(attendee.email !== undefined ? { email: attendee.email } : {}),
+      ...(attendee.displayName !== undefined ? { displayName: attendee.displayName } : {}),
+      ...(attendee.responseStatus !== undefined ? { responseStatus: attendee.responseStatus } : {}),
+    }));
+  }
+  if (event.creator !== undefined) projected.creator = event.creator;
+  if (event.organizer !== undefined) projected.organizer = event.organizer;
+  if (event.recurrence !== undefined) projected.recurrence = event.recurrence;
+  if (event.updated !== undefined) projected.updated = event.updated;
+  return projected;
 }
 
 export interface CalendarListEntry {

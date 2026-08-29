@@ -1,7 +1,14 @@
 import { z } from "zod";
 import type { GoogleMcpEnv } from "../env.ts";
 import type { CalendarClient } from "../google-calendar.ts";
-import { attendeeSchema, eventBody, eventTimeSchema, toText } from "./common.ts";
+import {
+  attendeeSchema,
+  type CalendarEvent,
+  eventBody,
+  eventTimeSchema,
+  projectEvent,
+  toText,
+} from "./common.ts";
 
 export const getEventSchema = {
   calendarId: z
@@ -68,9 +75,10 @@ export async function getEvent(
   const data = await client.get(
     calendarPath(env, args.calendarId, `/events/${encodeURIComponent(args.eventId)}`),
   );
+  const projected = projectEvent(data as CalendarEvent);
   return {
-    content: [{ type: "text" as const, text: toText(data) }],
-    structuredContent: data as Record<string, unknown>,
+    content: [{ type: "text" as const, text: toText(projected) }],
+    structuredContent: projected as Record<string, unknown>,
   };
 }
 
