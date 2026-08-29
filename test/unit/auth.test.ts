@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { RefreshTokenBroker } from "../../src/auth.ts";
+import { GoogleAuthError, RefreshTokenBroker, validateStartupCredentials } from "../../src/auth.ts";
 
 function tokenResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -26,5 +26,19 @@ describe("RefreshTokenBroker", () => {
       tokenResponse({ error: "invalid_grant" }, 400)) as unknown as typeof fetch;
     const broker = new RefreshTokenBroker("id", "secret", "refresh", fetcher);
     await expect(broker.accessToken()).rejects.toThrow("HTTP 400");
+  });
+
+  test("validates startup credentials with an injected fetcher", async () => {
+    const fetcher = (async () =>
+      tokenResponse({ access_token: "ya29.token", expires_in: 3600 })) as unknown as typeof fetch;
+    await expect(
+      validateStartupCredentials("id", "secret", "refresh", fetcher),
+    ).resolves.toBeUndefined();
+
+    const failingFetcher = (async () =>
+      tokenResponse({ error: "invalid_grant" }, 400)) as unknown as typeof fetch;
+    await expect(
+      validateStartupCredentials("id", "secret", "refresh", failingFetcher),
+    ).rejects.toBeInstanceOf(GoogleAuthError);
   });
 });

@@ -27,6 +27,20 @@ export const SERVER_VERSION = "0.1.0";
 
 type ToolHandler = (args: unknown, extra: unknown) => Promise<CallToolResult>;
 
+export interface ToolLogEntry {
+  event: "tool.call";
+  tool: string;
+  calendarId?: string;
+  latencyMs: number;
+  outcome: "success" | "deterministic_error" | "transient_error" | "validation_error";
+}
+
+export type ToolLogger = (entry: ToolLogEntry) => void;
+
+function defaultLogger(entry: ToolLogEntry): void {
+  console.log(JSON.stringify(entry));
+}
+
 function guard(fn: () => Promise<CallToolResult>): Promise<CallToolResult> {
   return fn().catch((error: unknown) => {
     if (isTransientError(error)) {
@@ -39,7 +53,11 @@ function guard(fn: () => Promise<CallToolResult>): Promise<CallToolResult> {
   });
 }
 
-export function createServer(client: CalendarClient, env: GoogleMcpEnv): McpServer {
+export function createServer(
+  client: CalendarClient,
+  env: GoogleMcpEnv,
+  logger: ToolLogger = defaultLogger,
+): McpServer {
   const server = new McpServer(
     { name: SERVER_NAME, version: SERVER_VERSION },
     { capabilities: { tools: { listChanged: false } } },
@@ -142,24 +160,50 @@ export function createServer(client: CalendarClient, env: GoogleMcpEnv): McpServ
   // The high-level SDK wraps tool errors as isError results; keep transient failures as protocol errors.
   server.server.removeRequestHandler("tools/call");
   server.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-    const tool = registeredTools.get(request.params.name);
-    if (!tool?.enabled) {
-      throw new McpError(ErrorCode.InvalidParams, `Tool ${request.params.name} not found`);
+    const started = performance.now();
+    const tool = request.params.name;
+    const args = request.params.arguments ?? {};
+    const calendarId =
+      typeof args === "object" && args !== null && "calendarId" in args
+        ? (args as { calendarId?: unknown }).calendarId
+        : undefined;
+
+    const log = (outcome: ToolLogEntry["outcome"]) =>
+      logger({
+        event: "tool.call",
+        tool,
+        ...(typeof calendarId === "string" ? { calendarId } : {}),
+        latencyMs: performance.now() - started,
+        outcome,
+      });
+
+    const registered = registeredTools.get(tool);
+    if (!registered?.enabled) {
+      log("validation_error");
+      throw new McpError(ErrorCode.InvalidParams, `Tool ${tool} not found`);
     }
 
-    let args: unknown = request.params.arguments ?? {};
+    let parsed: unknown = args;
     try {
-      const schema = tool.inputSchema as
+      const schema = registered.inputSchema as
         | { parseAsync(value: unknown): Promise<unknown> }
         | undefined;
-      if (schema) args = await schema.parseAsync(args);
+      if (schema) parsed = await schema.parseAsync(parsed);
     } catch (error) {
+      log("validation_error");
       throw new McpError(
         ErrorCode.InvalidParams,
         `Input validation error: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-    return (tool.handler as ToolHandler)(args, extra);
+    try {
+      const result = await (registered.handler as ToolHandler)(parsed, extra);
+      log(result.isError ? "deterministic_error" : "success");
+      return result;
+    } catch (error) {
+      log(isTransientError(error) ? "transient_error" : "deterministic_error");
+      throw error;
+    }
   });
 
   return server;

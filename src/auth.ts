@@ -17,6 +17,16 @@ export class GoogleAuthError extends Error {
   }
 }
 
+export async function validateStartupCredentials(
+  clientId: string,
+  clientSecret: string,
+  refreshToken: string,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  const broker = new RefreshTokenBroker(clientId, clientSecret, refreshToken, fetcher);
+  await broker.accessToken();
+}
+
 export class RefreshTokenBroker implements TokenBroker {
   #cached: TokenSet | undefined;
 

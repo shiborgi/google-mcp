@@ -1,6 +1,6 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { Hono } from "hono";
-import { RefreshTokenBroker } from "./auth.ts";
+import { RefreshTokenBroker, validateStartupCredentials } from "./auth.ts";
 import { type GoogleMcpEnv, loadEnv } from "./env.ts";
 import { GoogleCalendarClient } from "./google-calendar.ts";
 import { createServer, SERVER_NAME, SERVER_VERSION } from "./server.ts";
@@ -47,6 +47,19 @@ export function createApp(env: GoogleMcpEnv = loadEnv()) {
 
 if (import.meta.main) {
   const env = loadEnv();
+  if (!process.env.GOOGLE_MCP_SKIP_TOKEN_CHECK) {
+    try {
+      await validateStartupCredentials(env.clientId, env.clientSecret, env.refreshToken);
+    } catch (error) {
+      console.log(
+        JSON.stringify({
+          event: "startup.credential_check_failed",
+          error: error instanceof Error ? error.name : String(error),
+        }),
+      );
+      process.exit(1);
+    }
+  }
   const app = createApp(env);
   const server = Bun.serve({
     hostname: "0.0.0.0",

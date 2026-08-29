@@ -21,6 +21,7 @@ const env = {
   GOOGLE_CLIENT_ID: "id",
   GOOGLE_CLIENT_SECRET: "secret",
   GOOGLE_REFRESH_TOKEN: "refresh",
+  GOOGLE_MCP_SKIP_TOKEN_CHECK: "1",
 };
 
 describe("HTTP transport", () => {
