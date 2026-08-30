@@ -42,6 +42,17 @@ describe("HTTP transport", () => {
     proc?.kill();
   });
 
+  test("answers health probes without authentication", async () => {
+    const health = await fetch(`${base}/health`);
+    expect(health.status).toBe(200);
+    const body = (await health.json()) as { status: string; server: string };
+    expect(body.status).toBe("ready");
+    expect(body.server).toBe("google-mcp");
+
+    const live = await fetch(`${base}/health/live`);
+    expect(live.status).toBe(200);
+  });
+
   test("rejects unauthenticated MCP traffic when a token is configured", async () => {
     const res = await fetch(`${base}/mcp`, {
       method: "POST",

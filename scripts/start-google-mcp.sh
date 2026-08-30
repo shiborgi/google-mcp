@@ -5,19 +5,39 @@ set -euo pipefail
 root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 app_name="${GOOGLE_MCP_CONTAINER:-google-mcp}"
 image="${GOOGLE_MCP_IMAGE:-google-mcp:local}"
-network="${BARBACK_CONTAINER_NETWORK:-default}"
 port="${GOOGLE_MCP_PORT:-8090}"
 env_file="${GOOGLE_MCP_ENV_FILE:-$root_dir/.env}"
+network="${BARBACK_CONTAINER_NETWORK:-}"
+resolver="${BARBACK_DNS_RESOLVER:-}"
+search="${BARBACK_DNS_SEARCH:-barback.internal}"
+stack_id="${BARBACK_STACK_ID:-}"
+readiness_attempts="${GOOGLE_MCP_READINESS_ATTEMPTS:-30}"
+
+fail() {
+  printf 'Error: %s\n' "$1" >&2
+  exit 1
+}
+
+require_barback_input() {
+  local name="$1" value="$2"
+  if [[ -z "$value" ]]; then
+    fail "missing required managed-runtime input: set $name (Barback stack contract)"
+  fi
+}
+
+require_barback_input "BARBACK_CONTAINER_NETWORK" "$network"
+require_barback_input "BARBACK_DNS_RESOLVER" "$resolver"
+require_barback_input "BARBACK_DNS_SEARCH" "$search"
+require_barback_input "BARBACK_STACK_ID" "$stack_id"
+[[ "$stack_id" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] \
+  || fail "invalid stack identity '$stack_id': BARBACK_STACK_ID must be lowercase alphanumeric with inner hyphens"
 
 if ! command -v container >/dev/null 2>&1; then
-  printf 'Apple Container CLI not found. Install it and try again.\n' >&2
-  exit 1
+  fail "Apple Container CLI not found. Install it and try again."
 fi
 
 if [[ ! -f "$env_file" ]]; then
-  printf 'Environment file not found: %s\n' "$env_file" >&2
-  printf 'Create it with: cp .env.example .env and fill the Google credentials.\n' >&2
-  exit 1
+  fail "environment file not found: $env_file (create it from .env.example)."
 fi
 
 if ! container system status >/dev/null 2>&1; then
@@ -26,8 +46,7 @@ if ! container system status >/dev/null 2>&1; then
 fi
 
 if ! container network inspect "$network" >/dev/null 2>&1; then
-  printf 'Creating Apple Container network: %s\n' "$network"
-  container network create "$network"
+  fail "network '$network' does not exist; Barback owns network creation. Create the Barback stack first."
 fi
 
 printf 'Building MCP server image: %s\n' "$image"
@@ -46,22 +65,19 @@ container run \
   --detach \
   --name "$app_name" \
   --network "$network" \
-  --publish "127.0.0.1:${port}:${port}" \
+  --dns "$resolver" \
+  --dns-search "$search" \
+  --label "io.shiborgi.barback.stack=$stack_id" \
+  --label "io.shiborgi.barback.service=google" \
+  --label "io.shiborgi.barback.role=mcp" \
   --env-file "$env_file" \
   --env GOOGLE_MCP_PORT="$port" \
   "$image"
 
-for _ in {1..30}; do
+for _ in $(seq 1 "$readiness_attempts"); do
   if container exec "$app_name" bun -e 'const response = await fetch(`http://127.0.0.1:${process.env.GOOGLE_MCP_PORT}/health`); if (!response.ok) process.exit(1); console.log(await response.text());' 2>/dev/null; then
-    address="$(container inspect "$app_name" | plutil -extract '0.status.networks.0.ipv4Address' raw - 2>/dev/null || true)"
-    ip="${address%%/*}"
-    if [[ -n "$ip" ]]; then
-      printf 'google-mcp container IP: %s\n' "$ip"
-      printf 'GOOGLE_MCP_URL=http://%s:%s/mcp\n' "$ip" "$port"
-      printf 'Note: published ports were verified unreachable on this platform; container-to-container traffic must use the container IP above.\n'
-    else
-      printf 'Warning: could not resolve the google-mcp container IP; resolve it manually with: container inspect %s\n' "$app_name" >&2
-    fi
+    printf 'google-mcp is healthy.\n'
+    printf 'GOOGLE_MCP_URL=http://google.mcp.barback.internal:%s/mcp\n' "$port"
     exit 0
   fi
   sleep 1
