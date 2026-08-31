@@ -62,19 +62,27 @@ Interfaces:
 
 ## Barback integration
 
-Run google-mcp as a container on the same Apple Container network as Barback:
+google-mcp runs as a Barback-managed service on the Apple Container NAT network
+that Barback owns. Barback creates the network, the DNS resolver, and the
+lifecycle; google-mcp only consumes the injected resolver, search domain, and
+identity labels. The service is reached through its canonical FQDN,
+`google.mcp.barback.internal:8090`, which Barback's DNS control plane keeps
+current. You never inject a container IP into google-mcp or Barback, and you
+never rerun Barback after google-mcp's address changes.
+
+Launch the managed container with the Barback-supplied inputs:
 
 ```sh
+BARBACK_CONTAINER_NETWORK=barback \
+BARBACK_DNS_RESOLVER=<resolver-ip> \
+BARBACK_DNS_SEARCH=barback.internal \
+BARBACK_STACK_ID=barback-local \
 ./scripts/start-google-mcp.sh
 ```
 
-The script prints the resolved container IP and a ready-to-paste
-`GOOGLE_MCP_URL=http://<ip>:8090/mcp` line after the health check. Apple
-Container does not resolve container names via DNS, and published ports can be
-unreachable from the host, so the working address is the container IP on the
-shared network; use the printed `GOOGLE_MCP_URL` below. The IP changes when the
-container restarts, and [Barback](https://github.com/shiborgi/barback)'s
-startup script re-resolves it and injects the value at startup.
+The script requires the network, resolver, search domain, and stack identity,
+never creates the network or DNS records, never publishes port 8090, and prints
+the canonical endpoint `GOOGLE_MCP_URL=http://google.mcp.barback.internal:8090/mcp`.
 
 Then register it in `barback.yaml`:
 
@@ -116,6 +124,12 @@ recursive `env:` config loader, so the example needs no further edits. Grant
 the toolset to a policy (`mcpToolsets: [calendar]`) and the scopes `mcp:list`
 and `mcp:call` to the client. Clients then see the tools as `google.list_events`
 and so on.
+
+The managed container carries the `io.shiborgi.barback.stack`,
+`io.shiborgi.barback.service=google`, and `io.shiborgi.barback.role=mcp` labels
+so Barback can reconcile and re-identify it. When Barback recreates google-mcp
+at a different address, the DNS control plane converges within Barback's
+15-second budget and the FQDN keeps working without recreating `barback-gateway`.
 
 ## Development
 
