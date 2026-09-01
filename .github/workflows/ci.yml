@@ -15,9 +15,7 @@ jobs:
         with:
           bun-version: "1.4.0"
       - run: bun install --frozen-lockfile
-      - run: bun run typecheck
-      - run: bun run lint
-      - run: bun run test
+      - run: bun --no-env-file run check
   container:
     runs-on: ubuntu-latest
     timeout-minutes: 10
