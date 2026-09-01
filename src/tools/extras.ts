@@ -1,18 +1,23 @@
 import { z } from "zod";
 import type { GoogleMcpEnv } from "../env.ts";
 import type { CalendarClient } from "../google-calendar.ts";
-import { dateTimeOrDate, toText } from "./common.ts";
+import { calendarRangeError, dateTimeOrDate, toText, validateCalendarRange } from "./common.ts";
 
-export const freeBusySchema = {
-  timeMin: dateTimeOrDate.describe("Start of the interval (inclusive), RFC3339"),
-  timeMax: dateTimeOrDate.describe("End of the interval (exclusive), RFC3339"),
-  calendarIds: z
-    .array(z.string().min(1))
-    .min(1)
-    .optional()
-    .describe("Calendars to query; defaults to the configured calendar"),
-  timeZone: z.string().optional().describe("IANA time zone, e.g. America/Sao_Paulo"),
-};
+export const freeBusySchema = z
+  .object({
+    timeMin: dateTimeOrDate.describe("Start of the interval (inclusive), RFC3339"),
+    timeMax: dateTimeOrDate.describe("End of the interval (exclusive), RFC3339"),
+    calendarIds: z
+      .array(z.string().min(1))
+      .min(1)
+      .optional()
+      .describe("Calendars to query; defaults to the configured calendar"),
+    timeZone: z.string().optional().describe("IANA time zone, e.g. America/Sao_Paulo"),
+  })
+  .superRefine((value, context) => {
+    const error = calendarRangeError(value.timeMin, value.timeMax);
+    if (error) context.addIssue({ code: "custom", path: ["timeMax"], message: error });
+  });
 
 export const quickAddSchema = {
   calendarId: z
@@ -32,6 +37,7 @@ export async function freeBusy(
   env: GoogleMcpEnv,
   args: { timeMin: string; timeMax: string; calendarIds?: string[]; timeZone?: string },
 ) {
+  validateCalendarRange(args.timeMin, args.timeMax);
   const data = await client.post("/freeBusy", {
     timeMin: args.timeMin,
     timeMax: args.timeMax,

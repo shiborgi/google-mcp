@@ -89,4 +89,32 @@ describe("tool-call logging", () => {
     await mcp.close();
     await server.close();
   });
+
+  test("logs validation failures without input values", async () => {
+    const lines: string[] = [];
+    const { server, mcp } = await connected(fakeClient(), lines);
+
+    await expect(
+      mcp.callTool({
+        name: "create_event",
+        arguments: {
+          summary: "event title",
+          description: env.refreshToken,
+          start: { date: "2026-08-28" },
+          end: { dateTime: "2026-08-28T10:00:00-03:00" },
+        },
+      }),
+    ).rejects.toMatchObject({ name: "McpError", code: -32602 });
+
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0] ?? "{}")).toMatchObject({
+      event: "tool.call",
+      tool: "create_event",
+      outcome: "validation_error",
+    });
+    expect(lines[0]).not.toContain(env.refreshToken);
+    expect(lines[0]).not.toContain("event title");
+    await mcp.close();
+    await server.close();
+  });
 });

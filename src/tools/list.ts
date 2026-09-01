@@ -1,7 +1,14 @@
 import { z } from "zod";
 import type { GoogleMcpEnv } from "../env.ts";
 import type { CalendarClient } from "../google-calendar.ts";
-import { type CalendarEvent, dateTimeOrDate, projectEvent, toText } from "./common.ts";
+import {
+  type CalendarEvent,
+  calendarRangeError,
+  dateTimeOrDate,
+  projectEvent,
+  toText,
+  validateCalendarRange,
+} from "./common.ts";
 
 const MAX_RESULTS_LIMIT = 250;
 
@@ -17,22 +24,29 @@ export const listCalendarsSchema = {
   showHidden: z.boolean().optional().describe("Include hidden calendars"),
 };
 
-export const listEventsSchema = {
-  calendarId: z
-    .string()
-    .min(1)
-    .optional()
-    .describe("Calendar ID; defaults to the configured calendar"),
-  timeMin: dateTimeOrDate.optional().describe("Lower bound (inclusive) for event start time"),
-  timeMax: dateTimeOrDate.optional().describe("Upper bound (exclusive) for event end time"),
-  maxResults: z.number().int().min(1).max(2500).optional().describe("Maximum events to return"),
-  pageToken: z.string().optional().describe("Token from a previous response for pagination"),
-  q: z.string().optional().describe("Free text search terms"),
-  singleEvents: z
-    .boolean()
-    .optional()
-    .describe("Expand recurring events into instances; defaults to true"),
-};
+export const listEventsSchema = z
+  .object({
+    calendarId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Calendar ID; defaults to the configured calendar"),
+    timeMin: dateTimeOrDate.optional().describe("Lower bound (inclusive) for event start time"),
+    timeMax: dateTimeOrDate.optional().describe("Upper bound (exclusive) for event end time"),
+    maxResults: z.number().int().min(1).max(2500).optional().describe("Maximum events to return"),
+    pageToken: z.string().optional().describe("Token from a previous response for pagination"),
+    q: z.string().optional().describe("Free text search terms"),
+    singleEvents: z
+      .boolean()
+      .optional()
+      .describe("Expand recurring events into instances; defaults to true"),
+  })
+  .superRefine((value, context) => {
+    if (value.timeMin !== undefined && value.timeMax !== undefined) {
+      const error = calendarRangeError(value.timeMin, value.timeMax);
+      if (error) context.addIssue({ code: "custom", path: ["timeMax"], message: error });
+    }
+  });
 
 export async function listCalendars(
   client: CalendarClient,
@@ -62,6 +76,9 @@ export async function listEvents(
     singleEvents?: boolean;
   },
 ) {
+  if (args.timeMin !== undefined && args.timeMax !== undefined) {
+    validateCalendarRange(args.timeMin, args.timeMax);
+  }
   const data = await client.get(
     `/calendars/${encodeURIComponent(args.calendarId ?? env.defaultCalendarId)}/events`,
     {

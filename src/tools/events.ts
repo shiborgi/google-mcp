@@ -5,9 +5,11 @@ import {
   attendeeSchema,
   type CalendarEvent,
   eventBody,
+  eventRangeError,
   eventTimeSchema,
   projectEvent,
   toText,
+  validateEventRange,
 } from "./common.ts";
 
 export const getEventSchema = {
@@ -19,39 +21,53 @@ export const getEventSchema = {
   eventId: z.string().min(1).describe("Event ID"),
 };
 
-export const createEventSchema = {
-  calendarId: z
-    .string()
-    .min(1)
-    .optional()
-    .describe("Calendar ID; defaults to the configured calendar"),
-  summary: z.string().min(1).describe("Event title"),
-  description: z.string().optional(),
-  location: z.string().optional(),
-  start: eventTimeSchema.describe("Event start; use dateTime for timed events or date for all-day"),
-  end: eventTimeSchema.describe("Event end"),
-  attendees: z.array(attendeeSchema).optional(),
-  sendUpdates: z
-    .enum(["all", "externalOnly", "none"])
-    .optional()
-    .describe("Whether to send invitation emails; defaults to none"),
-};
+export const createEventSchema = z
+  .object({
+    calendarId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Calendar ID; defaults to the configured calendar"),
+    summary: z.string().min(1).describe("Event title"),
+    description: z.string().optional(),
+    location: z.string().optional(),
+    start: eventTimeSchema.describe(
+      "Event start; use dateTime for timed events or date for all-day",
+    ),
+    end: eventTimeSchema.describe("Event end"),
+    attendees: z.array(attendeeSchema).optional(),
+    sendUpdates: z
+      .enum(["all", "externalOnly", "none"])
+      .optional()
+      .describe("Whether to send invitation emails; defaults to none"),
+  })
+  .superRefine((value, context) => {
+    const error = eventRangeError(value.start, value.end);
+    if (error) context.addIssue({ code: "custom", path: ["end"], message: error });
+  });
 
-export const updateEventSchema = {
-  calendarId: z
-    .string()
-    .min(1)
-    .optional()
-    .describe("Calendar ID; defaults to the configured calendar"),
-  eventId: z.string().min(1).describe("Event ID"),
-  summary: z.string().min(1).optional(),
-  description: z.string().optional(),
-  location: z.string().optional(),
-  start: eventTimeSchema.optional(),
-  end: eventTimeSchema.optional(),
-  attendees: z.array(attendeeSchema).optional(),
-  sendUpdates: z.enum(["all", "externalOnly", "none"]).optional(),
-};
+export const updateEventSchema = z
+  .object({
+    calendarId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Calendar ID; defaults to the configured calendar"),
+    eventId: z.string().min(1).describe("Event ID"),
+    summary: z.string().min(1).optional(),
+    description: z.string().optional(),
+    location: z.string().optional(),
+    start: eventTimeSchema.optional(),
+    end: eventTimeSchema.optional(),
+    attendees: z.array(attendeeSchema).optional(),
+    sendUpdates: z.enum(["all", "externalOnly", "none"]).optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.start !== undefined && value.end !== undefined) {
+      const error = eventRangeError(value.start, value.end);
+      if (error) context.addIssue({ code: "custom", path: ["end"], message: error });
+    }
+  });
 
 export const deleteEventSchema = {
   calendarId: z
@@ -96,9 +112,12 @@ export async function createEvent(
     sendUpdates?: "all" | "externalOnly" | "none";
   },
 ) {
+  const start = eventTimeSchema.parse(args.start);
+  const end = eventTimeSchema.parse(args.end);
+  validateEventRange(start, end);
   const path = calendarPath(env, args.calendarId, "/events");
   const urlQuery = args.sendUpdates ? `?sendUpdates=${args.sendUpdates}` : "?sendUpdates=none";
-  const data = await client.post(`${path}${urlQuery}`, eventBody(args));
+  const data = await client.post(`${path}${urlQuery}`, eventBody({ ...args, start, end }));
   return {
     content: [{ type: "text" as const, text: toText(data) }],
     structuredContent: data as Record<string, unknown>,
@@ -120,9 +139,12 @@ export async function updateEvent(
     sendUpdates?: "all" | "externalOnly" | "none";
   },
 ) {
+  const start = args.start === undefined ? undefined : eventTimeSchema.parse(args.start);
+  const end = args.end === undefined ? undefined : eventTimeSchema.parse(args.end);
+  if (start !== undefined && end !== undefined) validateEventRange(start, end);
   const path = calendarPath(env, args.calendarId, `/events/${encodeURIComponent(args.eventId)}`);
   const urlQuery = args.sendUpdates ? `?sendUpdates=${args.sendUpdates}` : "?sendUpdates=none";
-  const data = await client.patch(`${path}${urlQuery}`, eventBody(args));
+  const data = await client.patch(`${path}${urlQuery}`, eventBody({ ...args, start, end }));
   return {
     content: [{ type: "text" as const, text: toText(data) }],
     structuredContent: data as Record<string, unknown>,

@@ -4,6 +4,7 @@ import type { GoogleMcpEnv } from "../../src/env.ts";
 import { type CalendarClient, GoogleApiError } from "../../src/google-calendar.ts";
 import { isTransientError } from "../../src/tools/common.ts";
 import { createEvent, getEvent } from "../../src/tools/events.ts";
+import { freeBusy } from "../../src/tools/extras.ts";
 import { listEvents } from "../../src/tools/list.ts";
 
 const env: GoogleMcpEnv = {
@@ -63,6 +64,56 @@ describe("calendar tools", () => {
       attendees: [{ email: "carol@example.com", optional: true }],
     });
     expect((result.structuredContent as { id: string }).id).toBe("evt-1");
+  });
+
+  test("rejects invalid event and range inputs before upstream requests", async () => {
+    let calls = 0;
+    const client: CalendarClient = {
+      async get() {
+        calls += 1;
+        return { items: [] };
+      },
+      async post() {
+        calls += 1;
+        return {};
+      },
+      async patch() {
+        calls += 1;
+        return {};
+      },
+      async delete() {
+        calls += 1;
+      },
+    };
+
+    await expect(
+      createEvent(client, env, {
+        summary: "Invalid event",
+        start: { date: "2026-08-29" },
+        end: { date: "2026-08-28" },
+      }),
+    ).rejects.toThrow("Event end must be after event start");
+    await expect(
+      createEvent(client, env, {
+        summary: "Mixed event",
+        start: { date: "2026-08-28" },
+        end: { dateTime: "2026-08-28T10:00:00-03:00" },
+      }),
+    ).rejects.toThrow("same date or dateTime form");
+    await expect(
+      freeBusy(client, env, {
+        timeMin: "2026-08-28T10:00:00-03:00",
+        timeMax: "2026-08-28T10:00:00-03:00",
+      }),
+    ).rejects.toThrow("Range end must be after range start");
+    await expect(
+      listEvents(client, env, {
+        timeMin: "2026-08-29",
+        timeMax: "2026-08-28",
+      }),
+    ).rejects.toThrow("Range end must be after range start");
+
+    expect(calls).toBe(0);
   });
 
   test("get_event projects heavy Google fields out of the response", async () => {

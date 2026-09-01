@@ -1,3 +1,7 @@
+import { createHash, timingSafeEqual } from "node:crypto";
+
+const BEARER_TOKEN_PATTERN = /^Bearer ([A-Za-z0-9._~+\-/]+=*)$/;
+
 export interface TokenSet {
   accessToken: string;
   expiresAt: number;
@@ -15,6 +19,16 @@ export class GoogleAuthError extends Error {
     super(message);
     this.name = "GoogleAuthError";
   }
+}
+
+export function hasValidBearerToken(header: string | undefined, expectedToken: string): boolean {
+  const match = header === undefined ? undefined : BEARER_TOKEN_PATTERN.exec(header);
+  const providedToken = match?.[1];
+  if (providedToken === undefined) return false;
+
+  const providedDigest = createHash("sha256").update(providedToken).digest();
+  const expectedDigest = createHash("sha256").update(expectedToken).digest();
+  return timingSafeEqual(providedDigest, expectedDigest);
 }
 
 export async function validateStartupCredentials(

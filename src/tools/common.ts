@@ -2,9 +2,11 @@ import { z } from "zod";
 import { GoogleAuthError } from "../auth.ts";
 import { GoogleApiError } from "../google-calendar.ts";
 
+const calendarDate = z.iso.date();
+const calendarDateTime = z.iso.datetime({ offset: true });
+
 export const dateTimeOrDate = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:\d{2})?)?$/)
+  .union([calendarDateTime, calendarDate])
   .describe("RFC3339 datetime (e.g. 2026-08-27T09:00:00-03:00) or a full-day date (YYYY-MM-DD)");
 
 export const attendeeSchema = z.object({
@@ -13,14 +15,79 @@ export const attendeeSchema = z.object({
   optional: z.boolean().optional(),
 });
 
-export const eventTimeSchema = z.object({
-  dateTime: dateTimeOrDate.optional(),
-  date: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional(),
-  timeZone: z.string().optional(),
-});
+export const eventTimeSchema = z
+  .object({
+    dateTime: calendarDateTime.optional(),
+    date: calendarDate.optional(),
+    timeZone: z.string().optional(),
+  })
+  .superRefine((value, context) => {
+    if ((value.date === undefined) === (value.dateTime === undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: ["dateTime"],
+        message: "Provide exactly one of date or dateTime",
+      });
+    }
+  });
+
+export type CalendarEventTime = z.infer<typeof eventTimeSchema>;
+
+export function eventRangeError(
+  start: CalendarEventTime,
+  end: CalendarEventTime,
+): string | undefined {
+  const startIsDate = start.date !== undefined;
+  const endIsDate = end.date !== undefined;
+  const startHasTime = start.dateTime !== undefined;
+  const endHasTime = end.dateTime !== undefined;
+
+  if (startIsDate === startHasTime || endIsDate === endHasTime) {
+    return "Event times must provide exactly one of date or dateTime";
+  }
+  if (startIsDate !== endIsDate) {
+    return "Event start and end must use the same date or dateTime form";
+  }
+
+  const startValue = start.date ?? start.dateTime;
+  const endValue = end.date ?? end.dateTime;
+  if (startValue === undefined || endValue === undefined) {
+    return "Event times must provide exactly one of date or dateTime";
+  }
+  if (startIsDate) {
+    return endValue > startValue ? undefined : "Event end must be after event start";
+  }
+
+  const startMilliseconds = Date.parse(startValue);
+  const endMilliseconds = Date.parse(endValue);
+  return endMilliseconds > startMilliseconds ? undefined : "Event end must be after event start";
+}
+
+export function validateEventRange(start: unknown, end: unknown): void {
+  const parsedStart = eventTimeSchema.parse(start);
+  const parsedEnd = eventTimeSchema.parse(end);
+  const error = eventRangeError(parsedStart, parsedEnd);
+  if (error) throw new Error(error);
+}
+
+export function calendarRangeError(start: string, end: string): string | undefined {
+  const startIsDate = !start.includes("T");
+  const endIsDate = !end.includes("T");
+  if (startIsDate !== endIsDate) return "Range bounds must use the same date or dateTime form";
+
+  if (startIsDate) return end > start ? undefined : "Range end must be after range start";
+
+  const startMilliseconds = Date.parse(start);
+  const endMilliseconds = Date.parse(end);
+  return endMilliseconds > startMilliseconds ? undefined : "Range end must be after range start";
+}
+
+export function validateCalendarRange(start: unknown, end: unknown): void {
+  const parsedStart = dateTimeOrDate.parse(start);
+  const parsedEnd = dateTimeOrDate.parse(end);
+  const error = calendarRangeError(parsedStart, parsedEnd);
+  if (error) throw new Error(error);
+}
 
 export interface CalendarEvent {
   id?: string;

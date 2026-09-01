@@ -1,6 +1,6 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { Hono } from "hono";
-import { RefreshTokenBroker, validateStartupCredentials } from "./auth.ts";
+import { hasValidBearerToken, RefreshTokenBroker, validateStartupCredentials } from "./auth.ts";
 import { type GoogleMcpEnv, loadEnv } from "./env.ts";
 import { GoogleCalendarClient } from "./google-calendar.ts";
 import { createServer, SERVER_NAME, SERVER_VERSION } from "./server.ts";
@@ -25,7 +25,7 @@ export function createApp(env: GoogleMcpEnv = loadEnv()) {
   app.use("/mcp", async (c, next) => {
     if (env.token) {
       const header = c.req.header("authorization");
-      if (header !== `Bearer ${env.token}`) return unauthorized();
+      if (!hasValidBearerToken(header, env.token)) return unauthorized();
     }
     await next();
   });

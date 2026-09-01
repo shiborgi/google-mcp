@@ -62,6 +62,31 @@ describe("HTTP transport", () => {
     expect(res.status).toBe(401);
   });
 
+  test("requires a strict bearer header without echoing credentials", async () => {
+    const headers = {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    };
+    const invalidHeaders: Record<string, string>[] = [
+      headers,
+      { ...headers, authorization: "bearer contract-token" },
+      { ...headers, authorization: "Bearer  contract-token" },
+      { ...headers, authorization: "Bearer contract-token," },
+      { ...headers, authorization: "Basic contract-token" },
+      { ...headers, authorization: "Bearer wrong-length-token" },
+    ];
+
+    for (const requestHeaders of invalidHeaders) {
+      const res = await fetch(`${base}/mcp`, {
+        method: "POST",
+        headers: requestHeaders,
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      });
+      expect(res.status).toBe(401);
+      expect(await res.text()).not.toContain("contract-token");
+    }
+  });
+
   test("initialize negotiates a protocol version for authorized clients", async () => {
     const res = await fetch(`${base}/mcp`, {
       method: "POST",
